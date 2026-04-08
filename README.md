@@ -1,5 +1,7 @@
 # KAIROX v3
 
+> Built for serious reconnaissance and professional security workflows.
+
 Advanced Reconnaissance Intelligence Platform
 
 ---
@@ -9,6 +11,16 @@ Advanced Reconnaissance Intelligence Platform
 KAIROX is a modern, high-performance reconnaissance tool designed for automated attack surface discovery, deep analysis, and structured intelligence output.
 
 This repository contains the **core version** of KAIROX.
+
+---
+
+## ⚙️ Execution Flow
+
+* Launch KAIROX
+* Accept legal agreement
+* Enter target domain
+* Automated reconnaissance pipeline starts
+* Results are processed and classified into intelligence tiers
 
 ---
 
@@ -24,15 +36,42 @@ This repository contains the **core version** of KAIROX.
 
 ---
 
+## ⚡ Why KAIROX
+
+KAIROX focuses on clarity, automation, and actionable intelligence — not noisy output.
+
+Designed to streamline reconnaissance workflows and highlight what actually matters.
+
+---
+
+## 🚀 Installation & Usage
+
+```bash
+git clone https://github.com/YOUR_USERNAME/Kairox-V3.git
+cd Kairox-V3
+chmod +x install.sh
+./install.sh
+./kairox
+```
+
+The tool will:
+
+1. Display banner
+2. Show legal disclaimer
+3. Ask for target domain
+4. Start reconnaissance automatically
+
+---
+
 ## 🧠 Intelligence Engine
 
-KAIROX focuses on **signal over noise**.
+KAIROX prioritizes **signal over noise**.
 
-Findings are automatically categorized into:
+Findings are categorized into:
 
-* HIGH VALUE → critical exposures
-* MEDIUM VALUE → interesting attack surface
-* LOW VALUE → general reconnaissance data
+* **HIGH VALUE** → critical exposures (admin panels, sensitive endpoints, exposed APIs)
+* **MEDIUM VALUE** → interesting attack surface (services, endpoints)
+* **LOW VALUE** → general reconnaissance data
 
 ---
 
@@ -40,35 +79,41 @@ Findings are automatically categorized into:
 
 This repository contains a **limited version** of KAIROX.
 
-The full version includes:
-
-* Extended scanning capabilities
-* Advanced intelligence modules
-* Enhanced automation engine
-* Premium UI enhancements
-* Additional integrations and features
-
 ---
 
 ## 💎 Premium Access
 
-For full access to the complete KAIROX platform:
+Unlock the full KAIROX platform:
 
-👉 Contact:
-Telegram → **@falcoonkairox**
+* Advanced scanning modules
+* Extended intelligence engine
+* Enhanced automation workflow
+* Additional integrations
+* Continuous updates
+
+**Limited premium access available**
+
+👉 Contact: **@falcoonkairox (Telegram)**
 
 ---
 
-## ⚠️ Legal
+## ⚠️ Legal Disclaimer
 
-This tool is strictly for **authorized security testing and research purposes**.
+This tool is intended strictly for **authorized security testing and research purposes**.
 
-Unauthorized use is prohibited.
+* Do NOT use against government or military infrastructure
+* Do NOT scan systems without explicit permission
 
-The author assumes no responsibility for misuse.
+The author assumes **no responsibility for misuse or damage**.
 
 ---
 
 ## 👨‍💻 Author
 
 Shadly Maliyekkal
+
+---
+
+## ⭐ Support
+
+If you find this project useful, consider supporting or upgrading to the premium version.
