@@ -1,0 +1,781 @@
+#!/usr/bin/env python3
+# ╔══════════════════════════════════════════════════════════════╗
+#   KAIROX v3 — Premium Reconnaissance Platform
+#   Author  : Shadly Maliyekkal
+#   License : For authorized security testing only
+# ╚══════════════════════════════════════════════════════════════╝
+
+import os, sys, time, subprocess, shutil, json, re, random
+from datetime import datetime
+from pathlib import Path
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich.table import Table
+    from rich.progress import (Progress, SpinnerColumn, BarColumn,
+                               TextColumn, TimeElapsedColumn, MofNCompleteColumn)
+    from rich.live import Live
+    from rich.rule import Rule
+    from rich.prompt import Prompt
+    from rich.markup import escape
+    from rich import box
+    from rich.align import Align
+    from rich.style import Style
+    from rich.theme import Theme
+    from rich.columns import Columns
+    from rich.segment import Segment
+    from rich.padding import Padding
+except ImportError:
+    print("[!] 'rich' not found. Run: pip install rich")
+    sys.exit(1)
+
+# ── Premium colour theme ────────────────────────────────────────
+THEME = Theme({
+    "kx.banner"   : "bold color(51)",
+    "kx.accent"   : "color(51)",
+    "kx.dim"      : "color(24)",
+    "kx.high"     : "bold color(196)",
+    "kx.medium"   : "bold color(214)",
+    "kx.low"      : "bold color(46)",
+    "kx.success"  : "bold color(82)",
+    "kx.warn"     : "bold color(226)",
+    "kx.danger"   : "bold color(196)",
+    "kx.gold"     : "bold color(220)",
+    "kx.purple"   : "bold color(135)",
+    "kx.pink"     : "bold color(205)",
+    "kx.teal"     : "bold color(43)",
+    "kx.subdomain": "color(75)",
+    "kx.host"     : "color(82)",
+    "kx.port"     : "color(214)",
+    "kx.url"      : "color(69)",
+    "kx.muted"    : "dim color(244)",
+})
+console = Console(theme=THEME, highlight=False)
+
+# ── Colour palette helpers ──────────────────────────────────────
+C_CYAN    = "color(51)"
+C_CYAN2   = "color(45)"
+C_BLUE    = "color(27)"
+C_PURPLE  = "color(135)"
+C_PINK    = "color(205)"
+C_GOLD    = "color(220)"
+C_GREEN   = "color(82)"
+C_RED     = "color(196)"
+C_ORANGE  = "color(214)"
+C_TEAL    = "color(43)"
+C_DARK    = "color(236)"
+C_GREY    = "color(244)"
+
+# ── Severity patterns ──────────────────────────────────────────
+HIGH_P   = [r"admin",r"login",r"dashboard",r"panel",r"manager",
+             r"api/v\d",r"api/",r"\.env",r"config",r"secret",
+             r"token",r"key",r"passwd",r"password",r"backup",
+             r"\.git",r"\.svn",r"phpmyadmin",r"wp-admin",r"cpanel",
+             r"webmail",r"console",r"swagger",r"graphql",r"actuator"]
+MEDIUM_P = [r"ftp",r"smtp",r"8080",r"8443",r"8888",r"proxy",
+             r"upload",r"download",r"file",r"static",r"assets",
+             r"old",r"bak",r"test",r"dev",r"staging"]
+LOW_P    = [r"ssh",r"22/",r"www",r"mail",r"blog",r"news",
+             r"images",r"css",r"js/",r"fonts"]
+
+def classify(text):
+    t = text.lower()
+    for p in HIGH_P:
+        if re.search(p, t): return "HIGH"
+    for p in MEDIUM_P:
+        if re.search(p, t): return "MEDIUM"
+    return "LOW"
+
+# ══════════════════════════════════════════════════════════════
+#   PREMIUM ANIMATION FUNCTIONS
+# ══════════════════════════════════════════════════════════════
+
+BANNER_LINES = [
+    " ██╗  ██╗ █████╗ ██╗██████╗  ██████╗ ██╗  ██╗",
+    " ██║ ██╔╝██╔══██╗██║██╔══██╗██╔═══██╗╚██╗██╔╝",
+    " █████╔╝ ███████║██║██████╔╝██║   ██║ ╚███╔╝ ",
+    " ██╔═██╗ ██╔══██║██║██╔══██╗██║   ██║ ██╔██╗ ",
+    " ██║  ██╗██║  ██║██║██║  ██║╚██████╔╝██╔╝ ██╗",
+    " ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝",
+]
+
+# Gradient colours per banner line (cyan → purple sweep)
+LINE_COLORS = [
+    "color(51)", "color(45)", "color(39)",
+    "color(33)", "color(99)", "color(135)"
+]
+
+GLITCH_CHARS = "▓▒░█▄▀■□▪▫◆◇○●"
+
+def glitch_char():
+    return random.choice(GLITCH_CHARS)
+
+def animate_banner():
+    """Cinematic banner: matrix rain → glitch → reveal → colour sweep."""
+    width = 47
+
+    # Phase 1 — matrix rain (fast)
+    rain_chars = "01アイウエオカキクケコサシスセソ█▓▒░"
+    for frame in range(18):
+        lines_out = []
+        for i, line in enumerate(BANNER_LINES):
+            reveal = int((frame / 17) * len(line))
+            glitch_zone = max(0, reveal - 3)
+            rain = "".join(
+                line[j] if j < glitch_zone
+                else (random.choice(rain_chars) if j < reveal else " ")
+                for j in range(len(line))
+            )
+            t = Text(rain, style=LINE_COLORS[i])
+            lines_out.append(Align.center(t))
+
+        with console:
+            console.control(Segment.control_codes())
+        console.print()
+        for l in lines_out:
+            console.print(l)
+        time.sleep(0.04)
+        # move cursor up
+        sys.stdout.write(f"\033[{len(BANNER_LINES)+1}A")
+        sys.stdout.flush()
+
+    # Phase 2 — glitch flash (3 flashes)
+    for flash in range(3):
+        glitch_lines = []
+        for i, line in enumerate(BANNER_LINES):
+            if flash % 2 == 0 and i in (1, 3):
+                glitched = "".join(
+                    glitch_char() if random.random() < 0.15 else c
+                    for c in line
+                )
+                t = Text(glitched, style="bold color(201)")
+            else:
+                t = Text(line, style=LINE_COLORS[i])
+            glitch_lines.append(Align.center(t))
+        console.print()
+        for l in glitch_lines:
+            console.print(l)
+        time.sleep(0.06)
+        sys.stdout.write(f"\033[{len(BANNER_LINES)+1}A")
+        sys.stdout.flush()
+
+    # Phase 3 — final clean render
+    console.print()
+    for i, line in enumerate(BANNER_LINES):
+        t = Text(line, style=f"bold {LINE_COLORS[i]}")
+        console.print(Align.center(t))
+
+    # Subtitle block
+    console.print()
+    subtitle = Text()
+    subtitle.append("  ━━━  ", style="color(24)")
+    subtitle.append("v3.0", style=f"bold {C_GOLD}")
+    subtitle.append("  ·  ", style="color(244)")
+    subtitle.append("PREMIUM RECONNAISSANCE PLATFORM", style=f"bold {C_CYAN}")
+    subtitle.append("  ━━━  ", style="color(24)")
+    console.print(Align.center(subtitle))
+
+    author = Text()
+    author.append("  by ", style="dim color(244)")
+    author.append("Shadly Maliyekkal", style=f"bold {C_PURPLE}")
+    author.append("  ·  ", style="dim color(244)")
+    author.append("Passive & Active OSINT Engine", style=f"italic color(75)")
+    console.print(Align.center(author))
+    console.print()
+
+def typewriter(text_obj, delay=0.018):
+    """Print a Rich Text char-by-char with typewriter effect."""
+    raw = text_obj.plain
+    for i in range(1, len(raw)+1):
+        partial = Text(raw[:i], style=text_obj._spans[0].style if text_obj._spans else "")
+        sys.stdout.write(f"\r{str(partial)}")
+        sys.stdout.flush()
+        time.sleep(delay)
+    console.print()
+
+def animated_rule(title, color=C_CYAN, char="━"):
+    """Animated rule that draws left-to-right."""
+    term_width = console.width or 80
+    side_len   = (term_width - len(title) - 4) // 2
+    rule_chars = char * side_len
+
+    # draw left side
+    line = Text()
+    for ch in rule_chars:
+        line.append(ch, style=f"bold {color}")
+    line.append(f"  {title}  ", style=f"bold {color}")
+    for ch in rule_chars:
+        line.append(ch, style=f"bold {color}")
+
+    full = rule_chars + f"  {title}  " + rule_chars
+    for i in range(1, len(full)+1, 3):
+        sys.stdout.write(f"\r\033[2K{full[:i]}")
+        sys.stdout.flush()
+        time.sleep(0.005)
+    sys.stdout.write(f"\r\033[2K")
+    console.print(Rule(f"[bold {color}]  {title}  [/]", style=color))
+
+def boot_sequence():
+    """Cinematic boot / initialisation animation."""
+    console.print()
+    boot_lines = [
+        ("SYSTEM", "Initialising KAIROX v3 engine …",         C_CYAN),
+        ("LOAD",   "Loading recon modules …",                  C_CYAN2),
+        ("LOAD",   "Loading OSINT fingerprints …",             C_CYAN2),
+        ("LOAD",   "Loading risk classifier …",                C_PURPLE),
+        ("OK",     "All modules loaded successfully",           C_GREEN),
+        ("READY",  "Engine ready — awaiting target",           C_GOLD),
+    ]
+    for tag, msg, color in boot_lines:
+        t = Text()
+        t.append(f"  [ ", style="color(244)")
+        t.append(f"{tag:6}", style=f"bold {color}")
+        t.append(" ]  ", style="color(244)")
+        t.append(msg, style=f"{color}")
+        # typewriter per line
+        raw = t.plain
+        for i in range(1, len(raw)+1):
+            sys.stdout.write(f"\r\033[2K{raw[:i]}")
+            sys.stdout.flush()
+            time.sleep(0.012)
+        console.print()
+        time.sleep(0.08)
+    console.print()
+
+def scanning_init_anim(target):
+    """Dramatic scan start animation."""
+    frames = ["◐","◓","◑","◒"]
+    msg = f"  LOCKING ON TARGET  {target}"
+    for i in range(20):
+        f = frames[i % len(frames)]
+        sys.stdout.write(f"\r  \033[1;36m{f}\033[0m  \033[1;37m{msg}\033[0m  \033[1;36m{f}\033[0m")
+        sys.stdout.flush()
+        time.sleep(0.08)
+    sys.stdout.write("\r\033[2K")
+
+    # target lock flash
+    for _ in range(2):
+        sys.stdout.write(f"\r  \033[1;196m[ TARGET LOCKED ]  {target}\033[0m")
+        sys.stdout.flush(); time.sleep(0.15)
+        sys.stdout.write(f"\r  \033[1;51m[ TARGET LOCKED ]  {target}\033[0m")
+        sys.stdout.flush(); time.sleep(0.15)
+    sys.stdout.write("\r\033[2K")
+    console.print()
+
+def finish_animation():
+    """Completion celebration animation."""
+    msgs = [
+        ("color(82)",  "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓"),
+        ("color(220)", "  ✔  RECONNAISSANCE COMPLETE  "),
+        ("color(51)",  "  KAIROX v3  ·  by Shadly Maliyekkal  "),
+        ("color(82)",  "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓"),
+    ]
+    console.print()
+    for color, text in msgs:
+        t = Text(text, style=f"bold {color}")
+        console.print(Align.center(t))
+        time.sleep(0.12)
+    console.print()
+
+# ══════════════════════════════════════════════════════════════
+#   LEGAL DISCLAIMER
+# ══════════════════════════════════════════════════════════════
+
+def show_disclaimer():
+    lines_text = [
+        f"[bold {C_GOLD}]  ⚠   LEGAL DISCLAIMER & TERMS OF USE   ⚠[/]",
+        "",
+        f"[bold color(255)]This tool is intended [bold {C_GREEN}]EXCLUSIVELY[/] for:[/]",
+        f"  [bold {C_GREEN}]✔[/]  Authorized penetration testing engagements",
+        f"  [bold {C_GREEN}]✔[/]  Security research on systems you own",
+        f"  [bold {C_GREEN}]✔[/]  Bug bounty programmes with written permission",
+        "",
+        f"[bold color(255)]This tool must [bold {C_RED}]NOT[/] be used against:[/]",
+        f"  [bold {C_RED}]✘[/]  Government or military infrastructure",
+        f"  [bold {C_RED}]✘[/]  Critical national infrastructure",
+        f"  [bold {C_RED}]✘[/]  Any target without explicit written authorisation",
+        f"  [bold {C_RED}]✘[/]  Systems outside an agreed scope of testing",
+        "",
+        f"[dim color(244)]The author accepts [bold color(255)]ZERO liability[/] for misuse, damage,",
+        "or any consequences from unauthorised use of this software.",
+        "You assume full legal responsibility.[/dim]",
+    ]
+    console.print(Panel(
+        "\n".join(lines_text),
+        title=f"[bold {C_RED}]  ╔══  ⚖  LEGAL  ⚖  ══╗  [/]",
+        border_style=C_RED,
+        padding=(1, 4),
+        expand=False,
+        box=box.DOUBLE_EDGE,
+    ))
+    console.print()
+
+def require_consent():
+    console.print(
+        f"  [bold color(255)]Accept these terms?  "
+        f"[bold {C_GREEN}]YES[/] [dim color(244)]to continue[/]  ·  "
+        f"[bold {C_RED}]NO[/] [dim color(244)]to exit[/][/]"
+    )
+    answer = Prompt.ask(f"  [bold {C_GOLD}]  ❯[/]", default="NO")
+    if answer.strip().upper() != "YES":
+        console.print()
+        console.print(Panel(
+            f"[bold {C_RED}]  Session terminated. Stay legal. Goodbye.  [/]",
+            border_style=C_RED, box=box.DOUBLE_EDGE, expand=False
+        ))
+        sys.exit(0)
+    console.print()
+
+# ══════════════════════════════════════════════════════════════
+#   UTILITY
+# ══════════════════════════════════════════════════════════════
+
+def tool_ok(name):
+    return shutil.which(name) is not None
+
+def run(cmd, timeout=300):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return True, (r.stdout or "").strip()
+    except subprocess.TimeoutExpired:
+        return False, f"[timeout {timeout}s]"
+    except FileNotFoundError:
+        return False, f"[not found: {cmd[0]}]"
+    except Exception as e:
+        return False, f"[error: {e}]"
+
+def lns(raw):
+    return [l.strip() for l in raw.splitlines() if l.strip()]
+
+def section_header(title, color=C_CYAN):
+    console.print()
+    console.print(Rule(
+        f"[bold {color}]  ◈  {title}  ◈  [/]",
+        style=color,
+        characters="─"
+    ))
+    console.print()
+
+# ══════════════════════════════════════════════════════════════
+#   TOOL STATUS TABLE
+# ══════════════════════════════════════════════════════════════
+
+def check_tools():
+    tools = {
+        "subfinder"   : ("passive subdomain enum",      C_CYAN),
+        "amass"       : ("OSINT subdomain enum",         C_CYAN2),
+        "httpx"       : ("live host probing",            C_GREEN),
+        "gau"         : ("URL harvesting",               C_PURPLE),
+        "waybackurls" : ("Wayback URL extraction",       C_PURPLE),
+        "nmap"        : ("port & service scanning",      C_ORANGE),
+        "curl"        : ("HTTP requests (fallback)",     C_GREY),
+    }
+
+    tbl = Table(
+        box=box.SIMPLE_HEAD,
+        show_header=True,
+        header_style=f"bold {C_CYAN}",
+        border_style=C_TEAL,
+        padding=(0, 2),
+        expand=False,
+    )
+    tbl.add_column("  TOOL",     style=C_CYAN,  no_wrap=True, min_width=14)
+    tbl.add_column("PURPOSE",    style="color(244)", min_width=32)
+    tbl.add_column("STATUS",     no_wrap=True)
+
+    for tool, (purpose, color) in tools.items():
+        if tool_ok(tool):
+            status = Text("  ● READY  ", style=f"bold {C_GREEN}")
+        else:
+            status = Text("  ○ ABSENT ", style=f"dim {C_RED}")
+        tbl.add_row(f"  {tool}", purpose, status)
+
+    console.print(Panel(
+        tbl,
+        title=f"[bold {C_CYAN}]  ◈  ARSENAL CHECK  ◈  [/]",
+        border_style=C_TEAL,
+        box=box.DOUBLE_EDGE,
+        expand=False,
+    ))
+    console.print()
+
+# ══════════════════════════════════════════════════════════════
+#   RECON ENGINE
+# ══════════════════════════════════════════════════════════════
+
+class KairoxRecon:
+    def __init__(self, target):
+        self.target   = target.strip().lower().removeprefix("http://").removeprefix("https://").rstrip("/")
+        self.results  = {"subdomains":[],"live_hosts":[],"urls":[],"ports":[],"dirs":[]}
+        self.findings = {"HIGH":[],"MEDIUM":[],"LOW":[]}
+        self.start_ts = datetime.now()
+
+    def run_subdomains(self, prog):
+        subs = set()
+        if tool_ok("subfinder"):
+            prog.log(f"  [bold {C_CYAN}]►[/] [bold color(255)]subfinder[/] [dim]→ passive subdomain sweep …[/]")
+            ok, out = run(["subfinder","-d",self.target,"-all","-recursive","-silent"], 180)
+            if ok:
+                for s in lns(out): subs.add(s.lower())
+        if tool_ok("amass"):
+            prog.log(f"  [bold {C_PURPLE}]►[/] [bold color(255)]amass[/] [dim]→ OSINT enumeration …[/]")
+            ok, out = run(["amass","enum","-passive","-d",self.target], 240)
+            if ok:
+                for s in lns(out): subs.add(s.lower())
+        if not tool_ok("subfinder") and not tool_ok("amass"):
+            prog.log(f"  [bold {C_ORANGE}]►[/] [dim]DNS wordlist fallback …[/]")
+            import socket
+            wordlist = ["www","mail","ftp","dev","staging","api","app","test",
+                        "admin","vpn","remote","beta","portal","shop","blog",
+                        "m","mobile","ns1","ns2","smtp","webmail","cdn","static"]
+            for word in wordlist:
+                host = f"{word}.{self.target}"
+                try:
+                    socket.gethostbyname(host); subs.add(host)
+                except: pass
+        self.results["subdomains"] = sorted(subs)
+        for s in self.results["subdomains"]:
+            self.findings[classify(s)].append(("subdomain", s))
+
+    def run_live_hosts(self, prog):
+        hosts = []
+        input_list = self.results["subdomains"] or [self.target]
+        if tool_ok("httpx"):
+            prog.log(f"  [bold {C_GREEN}]►[/] [bold color(255)]httpx[/] [dim]→ probing live hosts …[/]")
+            host_str = "\n".join(input_list)
+            try:
+                proc = subprocess.run(
+                    ["httpx","-silent","-status-code","-title","-tech-detect","-server","-no-color"],
+                    input=host_str, capture_output=True, text=True, timeout=180
+                )
+                for l in lns(proc.stdout):
+                    hosts.append(l)
+                    self.findings[classify(l)].append(("live_host", l))
+            except Exception as e:
+                prog.log(f"  [dim {C_RED}]httpx error: {e}[/]")
+        else:
+            prog.log(f"  [bold {C_ORANGE}]►[/] [dim]curl fallback host probe …[/]")
+            for h in input_list[:20]:
+                for scheme in ("https","http"):
+                    url = f"{scheme}://{h}"
+                    ok, code = run(["curl","-s","-o","/dev/null","-w","%{http_code}",
+                                    "-L","--max-time","5","--connect-timeout","3",url], 10)
+                    if ok and code.strip() in ("200","301","302","403","401"):
+                        entry = f"{url} [{code.strip()}]"
+                        hosts.append(entry)
+                        self.findings[classify(entry)].append(("live_host", entry))
+                        break
+        self.results["live_hosts"] = hosts
+
+    def run_urls(self, prog):
+        urls = set()
+        if tool_ok("gau"):
+            prog.log(f"  [bold {C_PURPLE}]►[/] [bold color(255)]gau[/] [dim]→ archive URL harvest …[/]")
+            ok, out = run(["gau","--threads","10",self.target], 180)
+            if ok:
+                for u in lns(out): urls.add(u)
+        if tool_ok("waybackurls"):
+            prog.log(f"  [bold {C_PURPLE}]►[/] [bold color(255)]waybackurls[/] [dim]→ Wayback lookup …[/]")
+            ok, out = run(["waybackurls",self.target], 120)
+            if ok:
+                for u in lns(out): urls.add(u)
+        for u in list(urls)[:500]:
+            sev = classify(u)
+            self.findings[sev].append(("url", u))
+        self.results["urls"] = sorted(urls)
+
+    def run_ports(self, prog):
+        if tool_ok("nmap"):
+            prog.log(f"  [bold {C_ORANGE}]►[/] [bold color(255)]nmap[/] [dim]→ port & service scan …[/]")
+            ok, out = run(["nmap","-sCV","-Pn","-T4","--open",
+                           "-p","21,22,23,25,53,80,110,143,443,445,3306,3389,5432,6379,8080,8443,8888,27017",
+                           self.target], 300)
+            if ok:
+                port_lines = []
+                for l in lns(out):
+                    if re.search(r"\d+/(tcp|udp)\s+open", l):
+                        port_lines.append(l)
+                        self.findings[classify(l)].append(("port", l))
+                self.results["ports"] = port_lines
+        else:
+            prog.log(f"  [bold {C_ORANGE}]►[/] [dim]socket port fallback …[/]")
+            import socket
+            open_ports = []
+            for port in [21,22,23,25,53,80,110,143,443,445,3306,3389,5432,6379,8080,8443]:
+                try:
+                    s = socket.socket(); s.settimeout(1.5)
+                    s.connect((self.target, port)); s.close()
+                    entry = f"{port}/tcp  open"
+                    open_ports.append(entry)
+                    self.findings[classify(entry)].append(("port", entry))
+                except: pass
+            self.results["ports"] = open_ports
+
+    def run_dirs(self, prog):
+        prog.log(f"  [bold {C_PINK}]►[/] [bold color(255)]path-probe[/] [dim]→ sensitive endpoint detection …[/]")
+        sensitive_paths = [
+            "/.env","/.git/HEAD","/.git/config","/robots.txt","/sitemap.xml",
+            "/admin","/admin/login","/login","/dashboard","/panel",
+            "/wp-admin","/wp-login.php","/phpmyadmin","/cpanel",
+            "/api","/api/v1","/api/v2","/graphql","/swagger",
+            "/swagger-ui.html","/actuator","/actuator/health",
+            "/backup","/backup.zip","/backup.tar.gz",
+            "/config.php","/config.yml","/config.json",
+            "/.htaccess","/server-status","/server-info",
+            "/webmail","/mail","/console","/debug","/test",
+            "/v1/api","/v2/api","/rest/api","/_profiler",
+            "/telescope","/horizon",
+        ]
+        found = []
+        base_urls = []
+        for h in self.results["live_hosts"][:5]:
+            m = re.match(r"(https?://[^\s/]+)", h)
+            if m: base_urls.append(m.group(1))
+        if not base_urls:
+            base_urls = [f"https://{self.target}", f"http://{self.target}"]
+        for base in base_urls[:3]:
+            for path in sensitive_paths:
+                url = base.rstrip("/") + path
+                ok, code = run(["curl","-s","-o","/dev/null","-w","%{http_code}",
+                                 "--max-time","5","--connect-timeout","3","-L",url], 10)
+                if ok and code.strip() in ("200","301","302","403","401"):
+                    entry = f"{url}  [{code.strip()}]"
+                    found.append(entry)
+                    self.findings["HIGH"].append(("sensitive_path", entry))
+        self.results["dirs"] = found
+
+    def extract_api_endpoints(self):
+        for u in self.results["urls"]:
+            if re.search(r"api|graphql|rest|v\d/|\.json|\.xml", u, re.I):
+                self.findings["HIGH"].append(("api_endpoint", u))
+
+    def run_all(self):
+        steps = [
+            ("Subdomain Enumeration",    self.run_subdomains,  C_CYAN,   "◈"),
+            ("Live Host Detection",      self.run_live_hosts,  C_GREEN,  "◈"),
+            ("URL Harvesting",           self.run_urls,        C_PURPLE, "◈"),
+            ("Port & Service Scan",      self.run_ports,       C_ORANGE, "◈"),
+            ("Sensitive Path Detection", self.run_dirs,        C_PINK,   "◈"),
+        ]
+
+        with Progress(
+            SpinnerColumn(spinner_name="dots12", style=f"bold {C_CYAN}"),
+            TextColumn(f"[bold color(255)]{{task.description}}"),
+            BarColumn(bar_width=30, style=C_TEAL, complete_style=C_GREEN,
+                      finished_style=f"bold {C_GREEN}"),
+            TextColumn(f"[bold {C_GOLD}]{{task.percentage:>3.0f}}%[/]"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=False,
+        ) as prog:
+            overall = prog.add_task(
+                f"[bold {C_CYAN}]  ◈  Overall Progress[/]",
+                total=len(steps)
+            )
+            for name, fn, color, icon in steps:
+                task = prog.add_task(
+                    f"[bold {color}]{icon}[/]  {name}",
+                    total=None
+                )
+                fn(prog)
+                prog.update(task, completed=1, total=1,
+                            description=f"[bold {C_GREEN}]✔[/]  {name}")
+                prog.advance(overall)
+                time.sleep(0.15)
+
+        self.extract_api_endpoints()
+
+# ══════════════════════════════════════════════════════════════
+#   REPORT RENDERER
+# ══════════════════════════════════════════════════════════════
+
+def render_results(recon):
+    elapsed = (datetime.now() - recon.start_ts).total_seconds()
+
+    finish_animation()
+
+    # ── Summary card ──
+    section_header("MISSION SUMMARY", C_GOLD)
+
+    meta = Table(box=box.SIMPLE_HEAD, show_header=False, padding=(0, 3), expand=False)
+    meta.add_column("K", style=f"bold {C_TEAL}",  no_wrap=True, min_width=18)
+    meta.add_column("V", style="bold color(255)")
+
+    meta.add_row("  Target",         f"[bold {C_CYAN}]{recon.target}[/]")
+    meta.add_row("  Timestamp",      datetime.now().strftime("%Y-%m-%d  %H:%M:%S"))
+    meta.add_row("  Duration",       f"[bold {C_GOLD}]{elapsed:.1f}s[/]")
+    meta.add_row("  Subdomains",     f"[bold {C_GREEN}]{len(recon.results['subdomains'])}[/]")
+    meta.add_row("  Live Hosts",     f"[bold {C_GREEN}]{len(recon.results['live_hosts'])}[/]")
+    meta.add_row("  URLs Harvested", f"[bold {C_PURPLE}]{len(recon.results['urls'])}[/]")
+    meta.add_row("  Open Ports",     f"[bold {C_ORANGE}]{len(recon.results['ports'])}[/]")
+    meta.add_row("  Sensitive Paths",f"[bold {C_RED}]{len(recon.results['dirs'])}[/]")
+    meta.add_row("  HIGH Findings",  f"[bold {C_RED}]{len(recon.findings['HIGH'])}[/]")
+    meta.add_row("  MEDIUM Findings",f"[bold {C_ORANGE}]{len(recon.findings['MEDIUM'])}[/]")
+    meta.add_row("  LOW Findings",   f"[bold {C_GREEN}]{len(recon.findings['LOW'])}[/]")
+
+    console.print(Panel(
+        meta,
+        title=f"[bold {C_GOLD}]  ◈  SCAN SUMMARY  ◈  [/]",
+        border_style=C_GOLD,
+        box=box.DOUBLE_EDGE,
+        expand=False,
+    ))
+
+    # ── Risk classification ──
+    section_header("RISK CLASSIFICATION", C_RED)
+
+    sev_cfg = [
+        ("HIGH",   C_RED,    "╔══ 🔴 HIGH RISK",   box.DOUBLE_EDGE),
+        ("MEDIUM", C_ORANGE, "╔══ 🟡 MEDIUM RISK", box.DOUBLE_EDGE),
+        ("LOW",    C_GREEN,  "╔══ 🟢 LOW RISK",    box.SIMPLE_HEAD),
+    ]
+    for sev, color, title_prefix, bx in sev_cfg:
+        items = recon.findings[sev]
+        if not items: continue
+
+        tbl = Table(box=box.SIMPLE, show_header=True,
+                    header_style=f"bold {color}",
+                    border_style=f"dim {color}",
+                    padding=(0, 2), expand=False)
+        tbl.add_column("TYPE",    style=f"dim {color}", no_wrap=True, min_width=18)
+        tbl.add_column("FINDING", style=f"bold {color}")
+
+        for ftype, value in items[:60]:
+            tbl.add_row(f"  {ftype.upper().replace('_',' ')}", escape(value))
+
+        extra = len(items) - 60
+        console.print(Panel(
+            tbl,
+            title=f"[bold {color}]  {title_prefix}  ──  {len(items)} findings  [/]",
+            border_style=color,
+            box=bx,
+            expand=False,
+        ))
+        if extra > 0:
+            console.print(f"  [dim {color}]… and {extra} more findings[/]\n")
+
+    # ── Subdomains ──
+    if recon.results["subdomains"]:
+        section_header("DISCOVERED SUBDOMAINS", C_CYAN)
+        tbl = Table(box=box.SIMPLE_HEAD, show_header=True,
+                    header_style=f"bold {C_CYAN}",
+                    border_style=C_TEAL,
+                    padding=(0, 2), expand=False)
+        tbl.add_column("  #",       style=f"dim {C_GREY}", justify="right", no_wrap=True, min_width=4)
+        tbl.add_column("SUBDOMAIN", style=f"bold {C_CYAN}")
+        tbl.add_column("SEVERITY",  style="bold color(255)", no_wrap=True, min_width=10)
+
+        sev_style = {"HIGH": C_RED, "MEDIUM": C_ORANGE, "LOW": C_GREEN}
+        for i, s in enumerate(recon.results["subdomains"][:80], 1):
+            sev = classify(s)
+            col = sev_style[sev]
+            tbl.add_row(str(i), s, f"[bold {col}]{sev}[/]")
+        console.print(tbl)
+
+    # ── Live Hosts ──
+    if recon.results["live_hosts"]:
+        section_header("LIVE HOSTS", C_GREEN)
+        for h in recon.results["live_hosts"][:40]:
+            console.print(f"  [bold {C_GREEN}]▶[/]  [bold {C_CYAN}]{escape(h)}[/]")
+
+    # ── Ports ──
+    if recon.results["ports"]:
+        section_header("OPEN PORTS & SERVICES", C_ORANGE)
+        for p in recon.results["ports"]:
+            sev = classify(p)
+            col = {"HIGH":C_RED,"MEDIUM":C_ORANGE,"LOW":C_GREEN}[sev]
+            console.print(f"  [bold {col}]●[/]  [bold {C_ORANGE}]{escape(p)}[/]")
+
+    # ── Sensitive paths ──
+    if recon.results["dirs"]:
+        section_header("SENSITIVE PATHS DETECTED", C_RED)
+        for d in recon.results["dirs"]:
+            console.print(f"  [bold {C_RED}]⚠[/]  [bold {C_RED}]{escape(d)}[/]")
+
+    # ── Interesting URLs ──
+    interesting = [(t,v) for sev in ("HIGH","MEDIUM")
+                   for t,v in recon.findings[sev]
+                   if t in ("url","api_endpoint")]
+    if interesting:
+        section_header("API ENDPOINTS & INTERESTING URLs", C_PURPLE)
+        for _, u in interesting[:30]:
+            console.print(f"  [bold {C_PURPLE}]⬡[/]  [bold {C_CYAN}]{escape(u)}[/]")
+
+    # ── Footer ──
+    console.print()
+    footer = Text()
+    footer.append("  KAIROX v3  ", style=f"bold {C_CYAN}")
+    footer.append("·", style=f"dim {C_GREY}")
+    footer.append("  by Shadly Maliyekkal  ", style=f"bold {C_PURPLE}")
+    footer.append("·", style=f"dim {C_GREY}")
+    footer.append("  For authorized use only  ", style=f"dim {C_GREY}")
+    console.print(Rule(style=C_TEAL, characters="━"))
+    console.print(Align.center(footer))
+    console.print(Rule(style=C_TEAL, characters="━"))
+    console.print()
+
+    save_report(recon)
+
+# ── JSON report ─────────────────────────────────────────────────
+def save_report(recon):
+    ts   = recon.start_ts.strftime("%Y%m%d_%H%M%S")
+    name = f"kairox_{recon.target.replace('.','_')}_{ts}.json"
+    data = {
+        "target":    recon.target,
+        "timestamp": recon.start_ts.isoformat(),
+        "results":   {k: list(v) for k, v in recon.results.items()},
+        "findings":  {s: list(i) for s, i in recon.findings.items()},
+    }
+    try:
+        Path(name).write_text(json.dumps(data, indent=2))
+        console.print(f"  [bold {C_GREEN}]✔[/]  Report saved [dim]→[/] [bold {C_CYAN}]{name}[/]\n")
+    except Exception as e:
+        console.print(f"  [bold {C_RED}]⚠[/]  Could not save: {e}\n")
+
+# ══════════════════════════════════════════════════════════════
+#   MAIN ENTRY POINT
+# ══════════════════════════════════════════════════════════════
+
+def main():
+    os.system("clear 2>/dev/null || cls 2>/dev/null")
+
+    animate_banner()
+    boot_sequence()
+    show_disclaimer()
+    require_consent()
+    check_tools()
+
+    console.print(f"  [bold {C_GOLD}]◈[/]  [bold color(255)]Enter target domain[/] [dim color(244)](e.g. example.com)[/]")
+    target = Prompt.ask(f"  [bold {C_CYAN}]  ❯[/]")
+    target = target.strip().lower().removeprefix("http://").removeprefix("https://").rstrip("/")
+
+    if not target or "." not in target:
+        console.print(f"\n  [bold {C_RED}]✘[/]  Invalid domain. Exiting.\n")
+        sys.exit(1)
+
+    console.print()
+    scanning_init_anim(target)
+
+    console.print(Panel(
+        f"  [bold {C_TEAL}]Target  [/]  [bold {C_CYAN}]{target}[/]\n"
+        f"  [bold {C_TEAL}]Mode    [/]  Passive + Active Reconnaissance\n"
+        f"  [bold {C_TEAL}]Engine  [/]  KAIROX v3  ·  by Shadly Maliyekkal",
+        title=f"[bold {C_GOLD}]  ◈  SCAN INITIALIZING  ◈  [/]",
+        border_style=C_GOLD,
+        box=box.DOUBLE_EDGE,
+        expand=False,
+    ))
+    console.print()
+
+    recon = KairoxRecon(target)
+    recon.run_all()
+    render_results(recon)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        console.print(f"\n\n  [bold {C_ORANGE}]⚡[/]  Interrupted. Exiting cleanly.\n")
+        sys.exit(0)
