@@ -1,0 +1,908 @@
+#!/usr/bin/env python3
+# ╔══════════════════════════════════════════════════════════════════╗
+#   KAIROX v3  —  Cinematic Premium Reconnaissance Platform
+#   Author  : Shadly Maliyekkal
+#   License : Authorized security testing ONLY
+# ╚══════════════════════════════════════════════════════════════════╝
+
+import os, sys, time, subprocess, shutil, json, re, random
+from datetime import datetime
+from pathlib import Path
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich.table import Table
+    from rich.progress import (Progress, SpinnerColumn, BarColumn,
+                               TextColumn, TimeElapsedColumn)
+    from rich.rule import Rule
+    from rich.prompt import Prompt
+    from rich.markup import escape
+    from rich import box
+    from rich.align import Align
+    from rich.theme import Theme
+    from rich.padding import Padding
+except ImportError:
+    print("\n  [!] 'rich' not found.  Run:  pip install rich\n")
+    sys.exit(1)
+
+# ══════════════════════════════════════════════════════════════════
+#   THEME & COLOUR CONSTANTS
+# ══════════════════════════════════════════════════════════════════
+
+THEME = Theme({
+    "kx.c1"  : "color(51)",
+    "kx.c2"  : "color(45)",
+    "kx.purp": "color(135)",
+    "kx.gold": "color(220)",
+    "kx.green":"color(82)",
+    "kx.red" : "color(196)",
+    "kx.orng": "color(214)",
+    "kx.teal": "color(43)",
+    "kx.grey": "color(244)",
+    "kx.dim" : "color(238)",
+    "kx.white":"color(255)",
+})
+console = Console(theme=THEME, highlight=False)
+
+C1   = "color(51)"    # neon cyan — primary brand
+C2   = "color(45)"    # bright cyan
+C3   = "color(39)"
+PURP = "color(135)"   # purple
+PINK = "color(201)"   # hot pink
+GOLD = "color(220)"   # gold
+GREEN= "color(82)"
+RED  = "color(196)"
+ORNG = "color(214)"
+TEAL = "color(43)"
+GREY = "color(244)"
+DIM  = "color(238)"
+WHITE= "color(255)"
+
+# ══════════════════════════════════════════════════════════════════
+#   SEVERITY CLASSIFICATION
+#
+#   RULE:
+#     HTTP 200 / 301 / 302  on sensitive path  →  HIGH   (actually reachable)
+#     HTTP 401              on any path         →  MEDIUM (exists, needs creds)
+#     HTTP 403              on any path         →  MEDIUM (firewall blocking — NOT high)
+#     URL/subdomain name-only (no status known) →  name-pattern based
+#     Ports / services                          →  name-pattern based
+# ══════════════════════════════════════════════════════════════════
+
+HIGH_PATHS = [
+    r"admin",r"login",r"dashboard",r"panel",r"manager",
+    r"api/v\d",r"api/",r"\.env",r"config",r"secret",
+    r"token",r"key",r"passwd",r"password",r"backup",
+    r"\.git",r"\.svn",r"phpmyadmin",r"wp-admin",r"cpanel",
+    r"webmail",r"console",r"swagger",r"graphql",r"actuator",
+    r"\.htaccess",r"\.ssh",r"id_rsa",r"shadow",r"passwd",
+]
+MEDIUM_PATHS = [
+    r"ftp",r"smtp",r"8080",r"8443",r"8888",r"proxy",
+    r"upload",r"download",r"file",r"static",r"assets",
+    r"old",r"bak",r"test",r"dev",r"staging",r"temp",
+]
+
+def classify_name(text):
+    """Classify by path/name pattern ONLY — no HTTP status involved."""
+    t = text.lower()
+    for p in HIGH_PATHS:
+        if re.search(p, t): return "HIGH"
+    for p in MEDIUM_PATHS:
+        if re.search(p, t): return "MEDIUM"
+    return "LOW"
+
+def classify_path_with_status(url, code):
+    """
+    Combine path sensitivity with live HTTP status code.
+
+    200 / 301 / 302  →  path is OPEN and reachable  →  honour name-based severity
+    401              →  path EXISTS but needs auth   →  MEDIUM (interesting, not free)
+    403              →  path is FIREWALL BLOCKED     →  MEDIUM (not freely accessible)
+    anything else    →  LOW
+
+    IMPORTANT: 403 is NEVER HIGH — a firewall returning 403 does NOT mean
+    the resource is exposed.  It means the opposite.
+    """
+    c = code.strip()
+    if c in ("200", "301", "302"):
+        # Truly accessible — name pattern decides severity
+        return classify_name(url)
+    elif c == "401":
+        # Exists but requires credentials
+        return "MEDIUM"
+    elif c == "403":
+        # Firewall / WAF blocking — path may not even exist
+        return "MEDIUM"
+    else:
+        return "LOW"
+
+def status_tag(code):
+    return {
+        "200": "OPEN",
+        "301": "REDIRECT",
+        "302": "REDIRECT",
+        "401": "AUTH-REQUIRED",
+        "403": "FIREWALL/BLOCKED",
+    }.get(code.strip(), code.strip())
+
+def sev_col(sev):
+    return {"HIGH": RED, "MEDIUM": ORNG, "LOW": GREEN}.get(sev, GREY)
+
+# ══════════════════════════════════════════════════════════════════
+#   TERMINAL HELPERS
+# ══════════════════════════════════════════════════════════════════
+
+def _up(n):
+    sys.stdout.write(f"\033[{n}A")
+    sys.stdout.flush()
+
+def tw():
+    return console.width or 100
+
+# ══════════════════════════════════════════════════════════════════
+#   BANNER + ANIMATIONS
+# ══════════════════════════════════════════════════════════════════
+
+BANNER = [
+    " ██╗  ██╗ █████╗ ██╗██████╗  ██████╗ ██╗  ██╗",
+    " ██║ ██╔╝██╔══██╗██║██╔══██╗██╔═══██╗╚██╗██╔╝",
+    " █████╔╝ ███████║██║██████╔╝██║   ██║ ╚███╔╝ ",
+    " ██╔═██╗ ██╔══██║██║██╔══██╗██║   ██║ ██╔██╗ ",
+    " ██║  ██╗██║  ██║██║██║  ██║╚██████╔╝██╔╝ ██╗",
+    " ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝",
+]
+LGRAD  = ["color(51)","color(45)","color(39)","color(33)","color(99)","color(135)"]
+MCHARS = "01アイウエオカキクケコサシスセソタチツ█▓▒░▄▀■□"
+GCHARS = "▓▒░█▄▀◆○●◇□■▪▫"
+
+def _frame(lines):
+    for l in lines:
+        console.print(Align.center(l if isinstance(l, Text) else Text(l)))
+
+def animate_banner():
+    os.system("clear 2>/dev/null || cls 2>/dev/null")
+    n = len(BANNER)
+
+    # Phase 1 — matrix rain reveal
+    for fr in range(28):
+        prog = fr / 27
+        flines = []
+        for i, line in enumerate(BANNER):
+            lr = min(1.0, max(0.0, prog * 1.6 - i * 0.1))
+            chars = []
+            for j, ch in enumerate(line):
+                cr = j / max(len(line)-1, 1)
+                if   lr > cr + 0.05: chars.append(ch)
+                elif lr > cr:        chars.append(random.choice(GCHARS))
+                else:                chars.append(random.choice(MCHARS) if random.random() < lr*0.7 else " ")
+            flines.append(Text("".join(chars), style=LGRAD[i]))
+        console.print()
+        _frame(flines)
+        time.sleep(0.03)
+        _up(n + 1)
+
+    # Phase 2 — glitch flashes
+    GCOLS = ["color(201)","color(51)","color(226)","color(196)","color(135)"]
+    for g in range(6):
+        flines = []
+        for i, line in enumerate(BANNER):
+            if g < 4 and random.random() < 0.45:
+                col = random.choice(GCOLS)
+                gl  = "".join(random.choice(GCHARS) if random.random()<0.20 else c for c in line)
+                flines.append(Text(gl, style=f"bold {col}"))
+            else:
+                flines.append(Text(line, style=f"bold {LGRAD[i]}"))
+        console.print()
+        _frame(flines)
+        time.sleep(0.055)
+        _up(n + 1)
+
+    # Phase 3 — colour sweep left→right
+    for fr in range(20):
+        sp = fr / 19
+        flines = []
+        for i, line in enumerate(BANNER):
+            t = Text()
+            for j, ch in enumerate(line):
+                d = abs(j / max(len(line)-1, 1) - sp)
+                if   d < 0.08: t.append(ch, style="bold color(255)")
+                elif d < 0.18: t.append(ch, style=f"bold {C1}")
+                elif d < 0.30: t.append(ch, style=f"bold {C2}")
+                else:          t.append(ch, style=f"bold {LGRAD[i]}")
+            flines.append(t)
+        console.print()
+        _frame(flines)
+        time.sleep(0.04)
+        _up(n + 1)
+
+    # Phase 4 — final stable render
+    console.print()
+    for i, line in enumerate(BANNER):
+        console.print(Align.center(Text(line, style=f"bold {LGRAD[i]}")))
+
+    console.print()
+    div = Text()
+    for ch in "━"*12: div.append(ch, style=f"bold {TEAL}")
+    div.append("  ◈  ", style=f"bold {GOLD}")
+    div.append("KAIROX v3", style=f"bold {C1}")
+    div.append("  ·  ", style=f"dim {GREY}")
+    div.append("PREMIUM RECONNAISSANCE PLATFORM", style=f"bold {C1}")
+    div.append("  ◈  ", style=f"bold {GOLD}")
+    for ch in "━"*12: div.append(ch, style=f"bold {TEAL}")
+    console.print(Align.center(div))
+
+    auth = Text()
+    auth.append("  crafted by ", style=f"dim {GREY}")
+    auth.append("Shadly Maliyekkal", style=f"bold {PURP}")
+    auth.append("  ·  ", style=f"dim {GREY}")
+    auth.append("Passive & Active OSINT Engine", style=f"italic {C2}")
+    console.print(Align.center(auth))
+    console.print()
+
+# ══════════════════════════════════════════════════════════════════
+#   BOOT SEQUENCE
+# ══════════════════════════════════════════════════════════════════
+
+def boot_sequence():
+    checks = [
+        ("Initializing recon engine",        0.18),
+        ("Loading signature database",       0.14),
+        ("Spawning async worker pool",       0.12),
+        ("Connecting passive OSINT feed",    0.16),
+        ("Calibrating packet timing engine", 0.13),
+        ("Engaging stealth subsystem",       0.11),
+        ("Mounting encrypted output store",  0.10),
+        ("System ready",                     0.20),
+    ]
+    BW = 32
+    console.print(f"  [bold {TEAL}]{chr(9472)*(BW+42)}[/]")
+    for label, delay in checks:
+        for pct in range(0, 101, random.randint(4,12)):
+            pct = min(100, pct)
+            f   = int(BW * pct / 100)
+            col = GREEN if pct==100 else C1
+            bt  = Text()
+            bt.append("  [", style=f"dim {GREY}")
+            bt.append("█"*f,     style=f"bold {col}")
+            bt.append("░"*(BW-f),style=f"dim {DIM}")
+            bt.append("]", style=f"dim {GREY}")
+            bt.append(f"  {pct:>3}%  ", style=f"bold {col}")
+            bt.append(label, style=f"bold {WHITE}" if pct<100 else f"bold {GREEN}")
+            if pct==100: bt.append("  ✔", style=f"bold {GREEN}")
+            sys.stdout.write("\r\033[2K")
+            console.print(bt, end="")
+            sys.stdout.flush()
+            if pct < 100: time.sleep(delay * random.uniform(0.05,0.18))
+        time.sleep(0.05)
+        sys.stdout.write("\r\033[2K")
+        sys.stdout.flush()
+    ok_t = Text()
+    ok_t.append("  [", style=f"dim {GREY}")
+    ok_t.append("█"*BW, style=f"bold {GREEN}")
+    ok_t.append("]", style=f"dim {GREY}")
+    ok_t.append("  100%  ALL SYSTEMS OPERATIONAL  ✔", style=f"bold {GREEN}")
+    console.print(ok_t)
+    console.print(f"  [bold {TEAL}]{chr(9472)*(BW+42)}[/]")
+    console.print()
+    time.sleep(0.3)
+
+# ══════════════════════════════════════════════════════════════════
+#   LEGAL DISCLAIMER
+# ══════════════════════════════════════════════════════════════════
+
+def show_disclaimer():
+    t = Text()
+    t.append("  ⚠  LEGAL DISCLAIMER & TERMS OF USE\n\n", style=f"bold {GOLD}")
+    t.append("  This tool is intended ", style=WHITE)
+    t.append("EXCLUSIVELY", style=f"bold {C1}")
+    t.append(" for:\n", style=WHITE)
+    for col, sym, msg in [
+        (GREEN,"✔","Authorized penetration testing engagements"),
+        (GREEN,"✔","Security research on systems you own or have permission to test"),
+        (GREEN,"✔","Bug bounty programmes with explicit written authorization"),
+    ]:
+        t.append("    "); t.append(sym, style=f"bold {col}")
+        t.append(f"  {msg}\n", style=WHITE)
+    t.append("\n  This tool must ", style=WHITE)
+    t.append("NOT", style=f"bold {RED}")
+    t.append(" be used against:\n", style=WHITE)
+    for col, sym, msg in [
+        (RED,"✘","Government or military infrastructure"),
+        (RED,"✘","Critical national infrastructure (energy, water, finance)"),
+        (RED,"✘","Any target without explicit written authorization"),
+        (RED,"✘","Systems outside your agreed scope of engagement"),
+    ]:
+        t.append("    "); t.append(sym, style=f"bold {col}")
+        t.append(f"  {msg}\n", style=WHITE)
+    t.append("\n  The author accepts ", style=f"dim {GREY}")
+    t.append("ZERO LIABILITY", style=f"bold {RED}")
+    t.append(" for misuse or unauthorized use.  You assume full legal responsibility.", style=f"dim {GREY}")
+    console.print(Panel(t, title=f"[bold {RED}]  ⚖  LEGAL DISCLAIMER  ⚖  [/]",
+                        border_style=RED, box=box.DOUBLE_EDGE, padding=(1,2), expand=False))
+    console.print()
+
+def require_consent():
+    console.print(f"  [bold {GOLD}]◈[/]  [bold {WHITE}]Do you accept these terms and confirm you have authorization?[/]")
+    answer = Prompt.ask(
+        f"  [bold {C1}]  Type[/] [bold {GREEN}]YES[/] [bold {C1}]to continue or[/] [bold {RED}]NO[/] [bold {C1}]to exit[/]"
+    )
+    if answer.strip().upper() != "YES":
+        console.print()
+        console.print(Panel(f"  [bold {RED}]Session terminated.  Goodbye.[/]",
+                            border_style=RED, box=box.DOUBLE_EDGE, expand=False))
+        console.print()
+        sys.exit(0)
+    console.print()
+
+# ══════════════════════════════════════════════════════════════════
+#   TOOL STATUS
+# ══════════════════════════════════════════════════════════════════
+
+def tool_ok(name):
+    return shutil.which(name) is not None
+
+def check_tools():
+    tools = [
+        ("subfinder",   "Passive subdomain enumeration"),
+        ("amass",       "OSINT subdomain enumeration"),
+        ("httpx",       "Live host probing"),
+        ("gau",         "URL harvesting from archives"),
+        ("waybackurls", "Wayback Machine URL extraction"),
+        ("nmap",        "Port & service scanning"),
+        ("curl",        "HTTP requests / path probing"),
+    ]
+    tbl = Table(box=box.SIMPLE_HEAD, header_style=f"bold {C1}",
+                border_style=TEAL, show_header=True, padding=(0,2), expand=False)
+    tbl.add_column("  TOOL",  style=f"bold {C2}",  no_wrap=True, min_width=14)
+    tbl.add_column("PURPOSE", style=f"dim {WHITE}")
+    tbl.add_column("STATUS",  no_wrap=True)
+    for name, purpose in tools:
+        st = Text("  ✔  INSTALLED  ", style=f"bold {GREEN}") if tool_ok(name) \
+             else Text("  ✘  MISSING    ", style=f"dim {RED}")
+        tbl.add_row(f"  {name}", purpose, st)
+    console.print(Panel(tbl, title=f"[bold {C1}]  ◈  TOOL STATUS  ◈  [/]",
+                        border_style=C1, box=box.DOUBLE_EDGE, expand=False))
+    console.print()
+
+# ══════════════════════════════════════════════════════════════════
+#   SCAN INIT ANIMATION
+# ══════════════════════════════════════════════════════════════════
+
+def scanning_init_anim(target):
+    for msg in [
+        f"[bold {TEAL}]◈[/]  Target locked  [bold {C1}]{target}[/]",
+        f"[bold {TEAL}]◈[/]  Resolving DNS chains ...",
+        f"[bold {TEAL}]◈[/]  Probing attack surface ...",
+        f"[bold {TEAL}]◈[/]  Spinning up recon modules ...",
+        f"[bold {TEAL}]◈[/]  [bold {GREEN}]Recon engines online.  Launching ...[/]",
+    ]:
+        console.print(f"  {msg}")
+        time.sleep(0.22)
+    console.print()
+
+# ══════════════════════════════════════════════════════════════════
+#   SECTION HEADER  (animated draw)
+# ══════════════════════════════════════════════════════════════════
+
+def section_header(title, color=C1):
+    console.print()
+    w    = tw()
+    pad  = max(0, (w - len(title) - 6) // 2)
+    left = chr(9473) * pad
+    rgt  = chr(9473) * (w - pad - len(title) - 6)
+    full = left + f"  {title}  " + rgt
+    for i in range(0, len(full)+1, 4):
+        sys.stdout.write(f"\r\033[2K  {full[:i]}")
+        sys.stdout.flush()
+        time.sleep(0.003)
+    sys.stdout.write("\r\033[2K")
+    line = Text()
+    line.append(left,           style=f"bold {TEAL}")
+    line.append(f"  {title}  ", style=f"bold {color}")
+    line.append(rgt,            style=f"bold {TEAL}")
+    console.print("  ", end="")
+    console.print(line)
+    console.print()
+
+# ══════════════════════════════════════════════════════════════════
+#   SCAN COMPLETE ANIMATION
+# ══════════════════════════════════════════════════════════════════
+
+def finish_animation():
+    console.print()
+    frames = [
+        ("▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱", 10, "Compiling results ..."),
+        ("███▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱", 25, "Running risk analysis ..."),
+        ("██████▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱", 40, "Classifying by HTTP status ..."),
+        ("█████████▱▱▱▱▱▱▱▱▱▱▱▱", 55, "Separating 403 from 200 findings ..."),
+        ("████████████▱▱▱▱▱▱▱▱▱", 68, "Generating report ..."),
+        ("███████████████▱▱▱▱▱▱", 80, "Writing JSON dump ..."),
+        ("██████████████████▱▱▱", 92, "Cleaning traces ..."),
+        ("█████████████████████", 100,"SCAN COMPLETE"),
+    ]
+    for i, (bar, pct, label) in enumerate(frames):
+        col = GREEN if i==len(frames)-1 else C1
+        bt = Text()
+        bt.append("  [", style=f"dim {GREY}")
+        bt.append(bar, style=f"bold {col}")
+        bt.append(f"]  {pct:>3}%  ", style=f"dim {GREY}")
+        bt.append(label, style=f"bold {col}")
+        sys.stdout.write("\r\033[2K")
+        console.print(bt, end="")
+        sys.stdout.flush()
+        time.sleep(0.14)
+    console.print()
+    console.print()
+
+# ══════════════════════════════════════════════════════════════════
+#   SUBPROCESS HELPER
+# ══════════════════════════════════════════════════════════════════
+
+def run_cmd(cmd, timeout=300):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return True, (r.stdout or "").strip()
+    except subprocess.TimeoutExpired:
+        return False, f"[timeout {timeout}s]"
+    except FileNotFoundError:
+        return False, f"[not found: {cmd[0]}]"
+    except Exception as e:
+        return False, f"[error: {e}]"
+
+def lns(raw):
+    return [l.strip() for l in raw.splitlines() if l.strip()]
+
+# ══════════════════════════════════════════════════════════════════
+#   RECON ENGINE
+# ══════════════════════════════════════════════════════════════════
+
+class KairoxRecon:
+    def __init__(self, target):
+        self.target   = target.strip().lower().removeprefix("http://").removeprefix("https://").rstrip("/")
+        self.results  = {"subdomains":[], "live_hosts":[], "urls":[], "ports":[], "dirs":[]}
+        self.findings = {"HIGH":[], "MEDIUM":[], "LOW":[]}
+        self.start_ts = datetime.now()
+
+    def _add(self, sev, ftype, value):
+        sev = sev if sev in self.findings else "LOW"
+        self.findings[sev].append((ftype, value))
+
+    # ── 1. Subdomains ────────────────────────────────────────────
+    def run_subdomains(self, prog):
+        subs = set()
+        if tool_ok("subfinder"):
+            prog.log(f"  [bold {C2}]subfinder[/] → passive subdomain scan ...")
+            ok, out = run_cmd(["subfinder","-d",self.target,"-all","-recursive","-silent"], 180)
+            if ok:
+                for s in lns(out): subs.add(s.lower())
+        if tool_ok("amass"):
+            prog.log(f"  [bold {C2}]amass[/] → OSINT enumeration ...")
+            ok, out = run_cmd(["amass","enum","-passive","-d",self.target], 240)
+            if ok:
+                for s in lns(out): subs.add(s.lower())
+        if not tool_ok("subfinder") and not tool_ok("amass"):
+            prog.log(f"  [bold {ORNG}]fallback[/] → DNS wordlist probe ...")
+            import socket
+            wl = ["www","mail","ftp","dev","staging","api","app","test","admin","vpn",
+                  "remote","beta","portal","shop","blog","m","mobile","ns1","ns2",
+                  "smtp","webmail","cdn","static","assets","media","img","data"]
+            for w in wl:
+                h = f"{w}.{self.target}"
+                try:
+                    socket.gethostbyname(h)
+                    subs.add(h)
+                except: pass
+        self.results["subdomains"] = sorted(subs)
+        for s in self.results["subdomains"]:
+            self._add(classify_name(s), "subdomain", s)
+
+    # ── 2. Live hosts ────────────────────────────────────────────
+    def run_live_hosts(self, prog):
+        hosts = []
+        inputs = self.results["subdomains"] or [self.target]
+        if tool_ok("httpx"):
+            prog.log(f"  [bold {C2}]httpx[/] → probing live hosts ...")
+            try:
+                r = subprocess.run(
+                    ["httpx","-silent","-status-code","-title","-tech-detect","-server","-no-color"],
+                    input="\n".join(inputs), capture_output=True, text=True, timeout=180)
+                for line in lns(r.stdout):
+                    hosts.append(line)
+                    m = re.search(r"\[(\d{3})\]", line)
+                    code = m.group(1) if m else "200"
+                    self._add(classify_path_with_status(line, code), "live_host", line)
+            except Exception as e:
+                prog.log(f"  [bold {RED}]httpx error:[/] {e}")
+        else:
+            prog.log(f"  [bold {ORNG}]fallback[/] → curl HTTP probe ...")
+            for h in inputs[:20]:
+                for scheme in ("https","http"):
+                    url = f"{scheme}://{h}"
+                    ok, code = run_cmd(
+                        ["curl","-s","-o","/dev/null","-w","%{http_code}",
+                         "-L","--max-time","5","--connect-timeout","3",url], 10)
+                    if ok and code.strip() in ("200","301","302","403","401"):
+                        e = f"{url}  [{code.strip()}  {status_tag(code.strip())}]"
+                        hosts.append(e)
+                        self._add(classify_path_with_status(url, code), "live_host", e)
+                        break
+        self.results["live_hosts"] = hosts
+
+    # ── 3. URLs ──────────────────────────────────────────────────
+    def run_urls(self, prog):
+        urls = set()
+        if tool_ok("gau"):
+            prog.log(f"  [bold {C2}]gau[/] → harvesting from archives ...")
+            ok, out = run_cmd(["gau","--threads","10",self.target], 180)
+            if ok:
+                for u in lns(out): urls.add(u)
+        if tool_ok("waybackurls"):
+            prog.log(f"  [bold {C2}]waybackurls[/] → Wayback Machine ...")
+            ok, out = run_cmd(["waybackurls",self.target], 120)
+            if ok:
+                for u in lns(out): urls.add(u)
+        # archived URLs have no live status — name-only classification
+        for u in list(urls)[:500]:
+            self._add(classify_name(u), "url", u)
+        self.results["urls"] = sorted(urls)
+
+    # ── 4. Ports ─────────────────────────────────────────────────
+    def run_ports(self, prog):
+        if tool_ok("nmap"):
+            prog.log(f"  [bold {C2}]nmap[/] → scanning common ports ...")
+            ports = "21,22,23,25,53,80,110,143,443,445,3306,3389,5432,6379,8080,8443,8888,27017"
+            ok, out = run_cmd(["nmap","-sCV","-Pn","-T4","--open","-p",ports,self.target], 300)
+            if ok:
+                for l in lns(out):
+                    if re.search(r"\d+/(tcp|udp)\s+open", l):
+                        self.results["ports"].append(l)
+                        self._add(classify_name(l), "port", l)
+        else:
+            prog.log(f"  [bold {ORNG}]fallback[/] → socket port scan ...")
+            import socket
+            for port in [21,22,23,25,53,80,110,143,443,445,3306,3389,5432,6379,8080,8443]:
+                try:
+                    s = socket.socket()
+                    s.settimeout(1.5)
+                    s.connect((self.target, port))
+                    s.close()
+                    e = f"{port}/tcp  open"
+                    self.results["ports"].append(e)
+                    self._add(classify_name(e), "port", e)
+                except: pass
+
+    # ── 5. Sensitive path detection ──────────────────────────────
+    #
+    # FIX: severity = classify_path_with_status(url, code)
+    #   • 200/301/302 on /admin    → HIGH   (truly open)
+    #   • 403         on /admin    → MEDIUM (firewall blocks it — not exposed)
+    #   • 401         on /admin    → MEDIUM (exists but needs creds)
+    #   • 403         on /backup   → MEDIUM
+    #   • 200         on /backup   → HIGH
+    #
+    def run_dirs(self, prog):
+        prog.log(f"  [bold {C2}]path-probe[/] → checking sensitive paths ...")
+        paths = [
+            "/.env","/.git/HEAD","/.git/config","/robots.txt","/sitemap.xml",
+            "/admin","/admin/login","/login","/dashboard","/panel",
+            "/wp-admin","/wp-login.php","/phpmyadmin","/cpanel",
+            "/api","/api/v1","/api/v2","/graphql","/swagger",
+            "/swagger-ui.html","/actuator","/actuator/health",
+            "/backup","/backup.zip","/backup.tar.gz",
+            "/config.php","/config.yml","/config.json",
+            "/.htaccess","/server-status","/server-info",
+            "/webmail","/mail","/console","/debug","/test","/trace",
+            "/v1/api","/v2/api","/rest/api","/_profiler",
+            "/.ssh/id_rsa","/etc/passwd","/proc/self/environ",
+        ]
+        base_urls = []
+        for h in self.results["live_hosts"][:5]:
+            m = re.match(r"(https?://[^\s/]+)", h)
+            if m: base_urls.append(m.group(1))
+        if not base_urls:
+            base_urls = [f"https://{self.target}", f"http://{self.target}"]
+
+        for base in base_urls[:3]:
+            for path in paths:
+                url = base.rstrip("/") + path
+                ok, code = run_cmd(
+                    ["curl","-s","-o","/dev/null","-w","%{http_code}",
+                     "--max-time","5","--connect-timeout","3","-L",url], 10)
+                code = code.strip()
+                if not ok or code not in ("200","301","302","401","403"):
+                    continue
+
+                # ─── STATUS-AWARE CLASSIFICATION ──────────────────────
+                # classify_path_with_status() ensures:
+                #   403 → always MEDIUM (firewall present, path not exposed)
+                #   401 → always MEDIUM (requires credentials)
+                #   200/301/302 → HIGH/MEDIUM/LOW based on path name
+                # ──────────────────────────────────────────────────────
+                sev   = classify_path_with_status(url, code)
+                label = status_tag(code)
+                entry = f"{url}  [{code}  {label}]"
+
+                # store as tuple (entry_string, severity, code) for grouped display
+                self.results["dirs"].append((entry, sev, code))
+                self._add(sev, "sensitive_path", entry)
+
+    # ── API endpoint extractor ───────────────────────────────────
+    def extract_api_endpoints(self):
+        for u in self.results["urls"]:
+            if re.search(r"api|graphql|rest|v\d/|\.json|\.xml", u, re.I):
+                sev = "HIGH" if classify_name(u) == "HIGH" else "MEDIUM"
+                self._add(sev, "api_endpoint", u)
+
+    # ── Master runner ────────────────────────────────────────────
+    def run_all(self):
+        steps = [
+            ("Subdomain Enumeration",    self.run_subdomains, C2,   "◈"),
+            ("Live Host Detection",      self.run_live_hosts, GREEN,"◈"),
+            ("URL Harvesting",           self.run_urls,       PURP, "◈"),
+            ("Port Scanning",            self.run_ports,      ORNG, "◈"),
+            ("Sensitive Path Detection", self.run_dirs,       RED,  "◈"),
+        ]
+        with Progress(
+            SpinnerColumn(spinner_name="arc", style=f"bold {C1}"),
+            TextColumn(f"[bold {WHITE}]{{task.description}}"),
+            BarColumn(bar_width=30, style=C1, complete_style=GREEN, finished_style=GREEN),
+            TextColumn(f"[bold {C1}]{{task.percentage:>3.0f}}%"),
+            TimeElapsedColumn(),
+            console=console, transient=False,
+        ) as prog:
+            overall = prog.add_task(f"[bold {GOLD}]  ◈  Total Progress[/]", total=len(steps))
+            for name, fn, col, icon in steps:
+                task = prog.add_task(f"[bold {col}]{icon}[/]  {name}", total=None)
+                fn(prog)
+                prog.update(task, completed=1, total=1,
+                            description=f"[bold {GREEN}]✔[/]  {name}")
+                prog.advance(overall)
+                time.sleep(0.12)
+        self.extract_api_endpoints()
+
+# ══════════════════════════════════════════════════════════════════
+#   REPORT RENDERER
+# ══════════════════════════════════════════════════════════════════
+
+def render_results(recon):
+    elapsed = (datetime.now() - recon.start_ts).total_seconds()
+    finish_animation()
+
+    # ── Summary ──
+    section_header("MISSION SUMMARY", GOLD)
+    meta = Table(box=box.SIMPLE_HEAD, show_header=False,
+                 padding=(0,3), border_style=TEAL, expand=False)
+    meta.add_column("K", style=f"bold {TEAL}",  no_wrap=True, min_width=22)
+    meta.add_column("V", style=f"bold {WHITE}")
+    for k, v in [
+        ("  Target",          f"[bold {C1}]{recon.target}[/]"),
+        ("  Timestamp",       datetime.now().strftime("%Y-%m-%d  %H:%M:%S")),
+        ("  Scan Duration",   f"[bold {GOLD}]{elapsed:.1f}s[/]"),
+        ("  Subdomains",      f"[bold {GREEN}]{len(recon.results['subdomains'])}[/]"),
+        ("  Live Hosts",      f"[bold {GREEN}]{len(recon.results['live_hosts'])}[/]"),
+        ("  URLs Harvested",  f"[bold {PURP}]{len(recon.results['urls'])}[/]"),
+        ("  Open Ports",      f"[bold {ORNG}]{len(recon.results['ports'])}[/]"),
+        ("  Sensitive Paths", f"[bold {RED}]{len(recon.results['dirs'])}[/]"),
+        ("  ─────────────────",""),
+        ("  🔴 HIGH  Findings",  f"[bold {RED}]{len(recon.findings['HIGH'])}[/]   [dim {GREY}]200/301/302 on sensitive paths[/]"),
+        ("  🟡 MEDIUM Findings", f"[bold {ORNG}]{len(recon.findings['MEDIUM'])}[/]   [dim {GREY}]403/401 (blocked/auth) + interesting services[/]"),
+        ("  🟢 LOW   Findings",  f"[bold {GREEN}]{len(recon.findings['LOW'])}[/]   [dim {GREY}]general attack surface[/]"),
+    ]:
+        meta.add_row(k, v)
+    console.print(Panel(meta, title=f"[bold {GOLD}]  ◈  SCAN SUMMARY  ◈  [/]",
+                        border_style=GOLD, box=box.DOUBLE_EDGE, expand=False))
+
+    # ── Severity legend ──
+    console.print()
+    leg = Text()
+    leg.append("  SEVERITY GUIDE  ", style=f"bold {WHITE}")
+    leg.append("  🔴 HIGH",    style=f"bold {RED}")
+    leg.append(" = HTTP 200/301/302 on sensitive path (truly accessible)  ",style=f"dim {WHITE}")
+    leg.append("  🟡 MEDIUM",  style=f"bold {ORNG}")
+    leg.append(" = HTTP 403 (firewall) or 401 (auth required) — NOT freely accessible  ",style=f"dim {WHITE}")
+    leg.append("  🟢 LOW",     style=f"bold {GREEN}")
+    leg.append(" = general surface  ", style=f"dim {WHITE}")
+    console.print(Panel(leg, border_style=TEAL, box=box.SIMPLE, expand=False, padding=(0,1)))
+
+    # ── Risk classification tables ──
+    section_header("RISK CLASSIFICATION", RED)
+    for sev, col, title_str in [
+        ("HIGH",   RED,  "🔴 HIGH RISK   — Confirmed Accessible (HTTP 200/301/302)"),
+        ("MEDIUM", ORNG, "🟡 MEDIUM RISK — Firewall/Auth Protected (HTTP 403/401) or Interesting"),
+        ("LOW",    GREEN,"🟢 LOW RISK    — General Attack Surface"),
+    ]:
+        items = recon.findings[sev]
+        if not items: continue
+        tbl = Table(box=box.SIMPLE, show_header=True,
+                    header_style=f"bold {col}", border_style=f"dim {col}",
+                    padding=(0,2), expand=False)
+        tbl.add_column("TYPE",    style=f"dim {col}",  no_wrap=True, min_width=20)
+        tbl.add_column("FINDING", style=f"bold {col}")
+        for ftype, value in items[:60]:
+            tbl.add_row(f"  {ftype.upper().replace('_',' ')}", escape(value))
+        extra = len(items) - 60
+        console.print(Panel(tbl,
+            title=f"[bold {col}]  {title_str}  ──  {len(items)} findings  [/]",
+            border_style=col, box=box.DOUBLE_EDGE, expand=False))
+        if extra > 0:
+            console.print(f"  [dim {col}]  … and {extra} more {sev} findings[/]\n")
+
+    # ── Subdomains ──
+    if recon.results["subdomains"]:
+        section_header("DISCOVERED SUBDOMAINS", C1)
+        tbl = Table(box=box.SIMPLE_HEAD, show_header=True,
+                    header_style=f"bold {C1}", border_style=TEAL,
+                    padding=(0,2), expand=False)
+        tbl.add_column("  #",       style=f"dim {GREY}", justify="right", no_wrap=True, min_width=4)
+        tbl.add_column("SUBDOMAIN", style=f"bold {C2}")
+        tbl.add_column("SEVERITY",  style=f"bold {WHITE}", no_wrap=True, min_width=10)
+        for i, s in enumerate(recon.results["subdomains"][:80], 1):
+            sev = classify_name(s)
+            tbl.add_row(str(i), s, f"[bold {sev_col(sev)}]{sev}[/]")
+        console.print(tbl)
+
+    # ── Live hosts ──
+    if recon.results["live_hosts"]:
+        section_header("LIVE HOSTS", GREEN)
+        for h in recon.results["live_hosts"][:40]:
+            t = Text()
+            t.append("  ▶  ", style=f"bold {GREEN}")
+            t.append(h, style=f"bold {C1}")
+            console.print(t)
+
+    # ── Ports ──
+    if recon.results["ports"]:
+        section_header("OPEN PORTS & SERVICES", ORNG)
+        for p in recon.results["ports"]:
+            col = sev_col(classify_name(p))
+            t = Text()
+            t.append("  ●  ", style=f"bold {col}")
+            t.append(p, style=f"bold {ORNG}")
+            console.print(t)
+
+    # ── Sensitive paths — grouped by severity ──
+    if recon.results["dirs"]:
+        section_header("SENSITIVE PATHS DETECTED", RED)
+
+        high_paths = [(e,c) for e,sev,c in recon.results["dirs"] if sev=="HIGH"]
+        med_paths  = [(e,c) for e,sev,c in recon.results["dirs"] if sev=="MEDIUM"]
+        low_paths  = [(e,c) for e,sev,c in recon.results["dirs"] if sev=="LOW"]
+
+        if high_paths:
+            console.print(f"  [bold {RED}]■[/]  [bold {RED}]CONFIRMED ACCESSIBLE  (HTTP 200/301/302)  —  HIGH RISK[/]")
+            console.print(f"  [dim {GREY}]     These paths responded with 200/redirect — they are genuinely reachable[/]")
+            console.print()
+            for entry, code in high_paths:
+                t = Text()
+                t.append("    ⚠  ", style=f"bold {RED}")
+                t.append(entry, style=f"bold {RED}")
+                console.print(t)
+            console.print()
+
+        if med_paths:
+            console.print(f"  [bold {ORNG}]■[/]  [bold {ORNG}]FIREWALL / AUTH PROTECTED  (HTTP 403/401)  —  MEDIUM RISK[/]")
+            console.print(f"  [dim {GREY}]     403 = firewall blocking (path may not even exist).  401 = requires credentials.[/]")
+            console.print(f"  [dim {GREY}]     These are NOT freely accessible.  Note for further investigation only.[/]")
+            console.print()
+            for entry, code in med_paths:
+                col = ORNG if code=="403" else PURP
+                icon= "◆" if code=="403" else "🔑"
+                t = Text()
+                t.append(f"    {icon}  ", style=f"bold {col}")
+                t.append(entry, style=f"bold {col}")
+                console.print(t)
+            console.print()
+
+        if low_paths:
+            console.print(f"  [bold {GREEN}]■[/]  [bold {GREEN}]LOW RISK PATHS[/]")
+            console.print()
+            for entry, code in low_paths:
+                t = Text()
+                t.append("    ○  ", style=f"bold {GREEN}")
+                t.append(entry, style=GREEN)
+                console.print(t)
+            console.print()
+
+    # ── API / interesting URLs ──
+    interesting = [(tp,v) for sev in ("HIGH","MEDIUM")
+                   for tp,v in recon.findings[sev]
+                   if tp in ("url","api_endpoint")]
+    if interesting:
+        section_header("API ENDPOINTS & INTERESTING URLs", PURP)
+        for _, u in interesting[:30]:
+            t = Text()
+            t.append("  ⬡  ", style=f"bold {PURP}")
+            t.append(u, style=f"bold {C2}")
+            console.print(t)
+
+    # ── Footer ──
+    console.print()
+    console.print(Rule(style=f"bold {TEAL}", characters="━"))
+    footer = Text()
+    footer.append("  KAIROX v3  ", style=f"bold {C1}")
+    footer.append("◈", style=f"bold {GOLD}")
+    footer.append("  by Shadly Maliyekkal  ", style=f"bold {PURP}")
+    footer.append("◈", style=f"bold {GOLD}")
+    footer.append("  Authorized use only  ", style=f"dim {GREY}")
+    console.print(Align.center(footer))
+    console.print(Rule(style=f"bold {TEAL}", characters="━"))
+    console.print()
+
+    save_report(recon)
+
+# ══════════════════════════════════════════════════════════════════
+#   SAVE JSON REPORT
+# ══════════════════════════════════════════════════════════════════
+
+def save_report(recon):
+    ts   = recon.start_ts.strftime("%Y%m%d_%H%M%S")
+    name = f"kairox_{recon.target.replace('.','_')}_{ts}.json"
+    dirs_out = [{"path": e, "severity": sev, "status_code": c}
+                for e, sev, c in recon.results["dirs"]]
+    data = {
+        "target":    recon.target,
+        "timestamp": recon.start_ts.isoformat(),
+        "severity_note": "HIGH=HTTP200/301/302 on sensitive path. MEDIUM=HTTP403(firewall) or 401(auth). NOT accessible=403.",
+        "results": {
+            "subdomains": recon.results["subdomains"],
+            "live_hosts": recon.results["live_hosts"],
+            "urls":       recon.results["urls"],
+            "ports":      recon.results["ports"],
+            "dirs":       dirs_out,
+        },
+        "findings": {s: list(i) for s, i in recon.findings.items()},
+    }
+    try:
+        Path(name).write_text(json.dumps(data, indent=2))
+        t = Text()
+        t.append("  ✔  ", style=f"bold {GREEN}")
+        t.append("Report saved  →  ", style=f"dim {GREY}")
+        t.append(name, style=f"bold {C1}")
+        console.print(t)
+        console.print()
+    except Exception as e:
+        console.print(f"  [bold {RED}]⚠[/]  Could not save report: {e}\n")
+
+# ══════════════════════════════════════════════════════════════════
+#   MAIN
+# ══════════════════════════════════════════════════════════════════
+
+def main():
+    animate_banner()
+    boot_sequence()
+    show_disclaimer()
+    require_consent()
+    check_tools()
+
+    console.print(f"  [bold {GOLD}]◈[/]  [bold {WHITE}]Enter target domain[/]  [dim {GREY}](e.g. example.com)[/]")
+    target = Prompt.ask(f"  [bold {C1}]  ❯[/]")
+    target = target.strip().lower().removeprefix("http://").removeprefix("https://").rstrip("/")
+
+    if not target or "." not in target:
+        console.print(f"\n  [bold {RED}]✘[/]  Invalid domain. Exiting.\n")
+        sys.exit(1)
+
+    console.print()
+    scanning_init_anim(target)
+
+    console.print(Panel(
+        f"  [bold {TEAL}]Target  [/]  [bold {C1}]{target}[/]\n"
+        f"  [bold {TEAL}]Mode    [/]  Passive + Active Reconnaissance\n"
+        f"  [bold {TEAL}]Engine  [/]  [bold {C1}]KAIROX v3[/]  ·  by Shadly Maliyekkal",
+        title=f"[bold {GOLD}]  ◈  SCAN INITIALIZING  ◈  [/]",
+        border_style=GOLD, box=box.DOUBLE_EDGE, expand=False))
+    console.print()
+
+    recon = KairoxRecon(target)
+    recon.run_all()
+    render_results(recon)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        console.print(f"\n\n  [bold {ORNG}]⚡[/]  Interrupted. Exiting cleanly.\n")
+        sys.exit(0)
